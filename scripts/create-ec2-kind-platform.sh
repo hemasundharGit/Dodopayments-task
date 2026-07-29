@@ -34,7 +34,7 @@ kubectl config use-context "kind-${CLUSTER_NAME}"
 
 echo "[3/6] Installing ingress, Sealed Secrets, Kyverno, and ArgoCD..."
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null
-helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets >/dev/null
+helm repo add sealed-secrets https://bitnami.github.io/sealed-secrets >/dev/null
 helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null
 helm repo update >/dev/null
 
