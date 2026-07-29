@@ -1,0 +1,44 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: ledger-api
+  namespace: ledger
+spec:
+  host: ledger-api.ledger.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: ledger-api-canary
+  namespace: ledger
+spec:
+  hosts:
+    - ledger-api.ledger.svc.cluster.local
+    - ledger.local
+  gateways:
+    - mesh
+    - ledger-gateway
+  http:
+    - route:
+        - destination:
+            host: ledger-api.ledger.svc.cluster.local
+            subset: stable
+            port:
+              number: 8080
+          weight: 90
+        - destination:
+            host: ledger-api.ledger.svc.cluster.local
+            subset: canary
+            port:
+              number: 8080
+          weight: 10

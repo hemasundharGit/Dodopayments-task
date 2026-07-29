@@ -1,0 +1,8 @@
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: ledger-mtls-strict
+  namespace: ledger
+spec:
+  mtls:
+    mode: STRICT

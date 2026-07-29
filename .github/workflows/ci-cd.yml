@@ -1,0 +1,268 @@
+name: Secure CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  id-token: write
+  attestations: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/ledger-api
+  APP_CONTEXT: task-1-workload-hardening/ledger-api-assignment/app
+  REPORT_DIR: task-2-secure-cicd/reports
+
+jobs:
+  secure-build:
+    name: Build, Scan, Sign, Attest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare report directory
+        run: mkdir -p "${REPORT_DIR}"
+
+      - name: Install Semgrep
+        run: python -m pip install --upgrade semgrep
+
+      - name: Run Semgrep SAST
+        id: semgrep
+        continue-on-error: true
+        run: |
+          semgrep scan \
+            --config p/ci \
+            --severity ERROR \
+            --error \
+            --sarif \
+            --output "${REPORT_DIR}/semgrep.sarif" \
+            .
+        # Semgrep uses INFO/WARNING/ERROR severities rather than literal
+        # high/critical labels. For this pipeline, ERROR maps to the
+        # high/critical-equivalent SAST gate and blocks release.
+
+      - name: Ensure Semgrep SARIF exists
+        if: always()
+        run: |
+          if [ ! -f "${REPORT_DIR}/semgrep.sarif" ]; then
+            echo '{"version":"2.1.0","runs":[]}' > "${REPORT_DIR}/semgrep.sarif"
+          fi
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.REPORT_DIR }}/semgrep.sarif
+          category: semgrep
+
+      - name: Enforce Semgrep high/critical policy
+        if: steps.semgrep.outcome == 'failure'
+        run: |
+          echo "Semgrep found blocking SAST findings. Policy: high/critical-equivalent findings block the pipeline."
+          exit 1
+
+      - name: Run Gitleaks secret scan
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_NOTIFY_USER_LIST: ""
+        with:
+          args: detect --source . --report-format sarif --report-path ${{ env.REPORT_DIR }}/gitleaks.sarif --redact --exit-code 1
+
+      - name: Ensure Gitleaks SARIF exists
+        if: always()
+        run: |
+          if [ ! -f "${REPORT_DIR}/gitleaks.sarif" ]; then
+            echo '{"version":"2.1.0","runs":[]}' > "${REPORT_DIR}/gitleaks.sarif"
+          fi
+
+      - name: Upload Gitleaks SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.REPORT_DIR }}/gitleaks.sarif
+          category: gitleaks
+
+      - name: Enforce Gitleaks policy
+        if: steps.gitleaks.outcome == 'failure'
+        run: |
+          echo "Gitleaks found a secret. Policy: any secret finding hard-fails the pipeline."
+          exit 1
+
+      - name: Run Trivy filesystem scan for SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: ${{ env.REPORT_DIR }}/trivy-fs.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Upload Trivy filesystem SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.REPORT_DIR }}/trivy-fs.sarif
+          category: trivy-filesystem
+
+      - name: Enforce Trivy filesystem CVE policy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+        # Policy: critical vulnerabilities with an available fix hard-fail.
+        # Critical vulnerabilities with no fixed version are warn-only here,
+        # because blocking on an unfixable advisory causes build deadlock.
+        # They must be time-boxed, risk accepted, and tracked in an issue.
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for pull request
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.APP_CONTEXT }}
+          load: true
+          tags: ledger-api:${{ github.sha }}
+
+      - name: Build and push image
+        id: build
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.APP_CONTEXT }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Run Trivy image scan for SARIF
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: ${{ env.REPORT_DIR }}/trivy-image.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Upload Trivy image SARIF
+        if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.REPORT_DIR }}/trivy-image.sarif
+          category: trivy-image
+
+      - name: Enforce Trivy image CVE policy
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+        # Same CVE policy as filesystem scanning:
+        # fixed critical CVE = hard block; unfixed critical CVE = warning,
+        # time-boxed exception, and tracked remediation/risk issue.
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign keyless
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes "${IMAGE_NAME}@${{ steps.build.outputs.digest }}"
+
+      - name: Generate SLSA-style provenance predicate
+        if: github.event_name != 'pull_request'
+        run: |
+          DIGEST_HEX="${{ steps.build.outputs.digest }}"
+          DIGEST_HEX="${DIGEST_HEX#sha256:}"
+          cat > "${REPORT_DIR}/slsa-provenance.json" <<EOF
+          {
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [
+              {
+                "name": "${IMAGE_NAME}",
+                "digest": {
+                  "sha256": "${DIGEST_HEX}"
+                }
+              }
+            ],
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {
+              "buildDefinition": {
+                "buildType": "https://github.com/Attestations/GitHubActionsWorkflow@v1",
+                "externalParameters": {
+                  "workflow": "${{ github.workflow }}",
+                  "repository": "${{ github.repository }}",
+                  "ref": "${{ github.ref }}",
+                  "sha": "${{ github.sha }}"
+                }
+              },
+              "runDetails": {
+                "builder": {
+                  "id": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Attach provenance attestation with Cosign keyless
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign attest --yes \
+            --type slsaprovenance \
+            --predicate "${REPORT_DIR}/slsa-provenance.json" \
+            "${IMAGE_NAME}@${{ steps.build.outputs.digest }}"
+
+      - name: Publish GitHub artifact attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Upload scanner and provenance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-cicd-reports
+          path: ${{ env.REPORT_DIR }}

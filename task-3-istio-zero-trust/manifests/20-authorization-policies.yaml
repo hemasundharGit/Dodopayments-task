@@ -1,0 +1,86 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: ledger-default-deny
+  namespace: ledger
+spec: {}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-neighbour-to-ledger-api
+  namespace: ledger
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ledger/sa/ledger-neighbour
+      to:
+        - operation:
+            methods:
+              - GET
+              - POST
+            paths:
+              - /health
+              - /transactions
+              - /tokenize
+              - /fetch
+            ports:
+              - "8080"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ledger-api-to-neighbour
+  namespace: ledger
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-neighbour
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ledger/sa/ledger-api
+      to:
+        - operation:
+            methods:
+              - GET
+            paths:
+              - /
+              - /health
+            ports:
+              - "8080"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-gateway-to-ledger-api
+  namespace: ledger
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account
+      to:
+        - operation:
+            methods:
+              - GET
+              - POST
+            paths:
+              - /health
+              - /transactions
+              - /tokenize
+            ports:
+              - "8080"
