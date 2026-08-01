@@ -112,8 +112,8 @@ File: `deploy/deployment.yaml`
 Findings:
 
 - Plaintext secrets are committed directly in the Deployment:
-  - `STRIPE_API_KEY="sk_live_9f3a2b7c1e4d8REDACTED"`
-  - `DB_PASSWORD="P@ssw0rd123"`
+  - `STRIPE_API_KEY="<example-stripe-key-redacted-for-documentation>"`
+  - `DB_PASSWORD="<example-hardcoded-password-redacted-for-documentation>"` 
 - No dedicated `serviceAccountName` is set, so pods use the namespace default ServiceAccount.
 - No `automountServiceAccountToken: false`; pods may receive Kubernetes API tokens unnecessarily.
 - No pod-level or container-level `securityContext`.
