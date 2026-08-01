@@ -262,7 +262,7 @@ jobs:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign attest --yes \
-            --type slsaprovenance \
+            --type slsaprovenance1 \
             --predicate "${REPORT_DIR}/slsa-provenance.json" \
             "${IMAGE_NAME}@${IMAGE_DIGEST}"
 
