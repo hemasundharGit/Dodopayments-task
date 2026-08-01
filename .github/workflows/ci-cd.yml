@@ -215,6 +215,12 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          GH_WORKFLOW: ${{ github.workflow }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_REF: ${{ github.ref }}
+          GH_SHA: ${{ github.sha }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          GH_RUN_ID: ${{ github.run_id }}
         run: |
           DIGEST_HEX="${IMAGE_DIGEST}"
           DIGEST_HEX="${DIGEST_HEX#sha256:}"
@@ -234,15 +240,15 @@ jobs:
               "buildDefinition": {
                 "buildType": "https://github.com/Attestations/GitHubActionsWorkflow@v1",
                 "externalParameters": {
-                  "workflow": "${{ github.workflow }}",
-                  "repository": "${{ github.repository }}",
-                  "ref": "${{ github.ref }}",
-                  "sha": "${{ github.sha }}"
+                  "workflow": "${GH_WORKFLOW}",
+                  "repository": "${GH_REPOSITORY}",
+                  "ref": "${GH_REF}",
+                  "sha": "${GH_SHA}"
                 }
               },
               "runDetails": {
                 "builder": {
-                  "id": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  "id": "${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
                 }
               }
             }
