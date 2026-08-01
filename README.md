@@ -5,10 +5,11 @@
 
 *A microservice handling cardholder-adjacent data walked onto a shared cluster wearing root privileges and a plaintext key. The audit clock is running. This is the fix.*
 
-![status](https://img.shields.io/badge/status-in--progress-yellow)
+![status](https://img.shields.io/badge/status-complete-success)
 ![scope](https://img.shields.io/badge/PCI--DSS-in--scope-critical)
 ![env](https://img.shields.io/badge/runs-100%25%20local-blue)
-![tasks](https://img.shields.io/badge/tasks-4%2F4%20attempted-informational)
+![pipeline](https://img.shields.io/badge/CI%2FCD-passing-success)
+![tasks](https://img.shields.io/badge/tasks-4%2F4%20complete-success)
 
 </div>
 
@@ -45,7 +46,7 @@ flowchart LR
 | 2 | **Secure CI/CD & Supply Chain** | Nothing unscanned, unsigned, or leaking secrets reaches the cluster | [`task-2-secure-cicd/`](./task-2-secure-cicd) · [`.github/workflows/`](./.github/workflows) |
 | 3 | **Zero-Trust Mesh (Istio)** | Services trust identity, not IP — and defense-in-depth is real, not decorative | [`task-3-istio-zero-trust/`](./task-3-istio-zero-trust) |
 | 4a | **Recon (passive)** | What an outside attacker sees before they touch anything | [`task-4-recon-pentest/part-a-recon/`](./task-4-recon-pentest/part-a-recon) |
-| 4b | **Pen Test (authorized)** | The hardening actually holds under pressure | `task-4-recon-pentest/part-b-pentest/` *(in progress)* |
+| 4b | **Pen Test (authorized)** | The hardening actually holds under pressure | [`task-4-recon-pentest/part-b-pentest/`](./task-4-recon-pentest/part-b-pentest) |
 | — | **Runbook** | Every command + expected output, so this is reproducible, not a screenshot slideshow | [`LOCAL-SETUP-AND-RUNBOOK.md`](./LOCAL-SETUP-AND-RUNBOOK.md) |
 
 ---
@@ -122,6 +123,25 @@ exception rather than freezing delivery.
 `argocd app diff` showing the drift, then `argocd app sync` showing it
 self-heal back to what's in git.
 
+#### ✅ Live evidence — [run #30710873777](https://github.com/hemasundharGit/Dodopayments-task/actions/runs/30710873777)
+
+Full pipeline (build → scan → sign → attest) passed end to end in 2m 18s.
+
+| Gate | Result | Detail |
+|---|---|---|
+| Semgrep SAST | ✅ Pass | 0 blocking findings |
+| Gitleaks secrets scan | ✅ Pass | 0 findings — cleared after redacting example-secret literals in docs/manifests |
+| Trivy filesystem scan | ⚠️ Reported | 11 dependency CVEs found in `app/requirements.txt` — none blocking (no unfixed criticals) |
+| Trivy image scan | ⚠️ Reported | 185 CVEs found in the built image — 3 flagged `CRITICAL`, none blocked the pipeline (unfixed at time of scan, per stated exception policy) |
+| Cosign keyless signing | ✅ Pass | Image signed via GitHub OIDC identity |
+| SLSA provenance attestation | ✅ Pass | `slsa-provenance.json` generated and attached |
+| GitHub artifact attestation | ✅ Pass | Published via `actions/attest-build-provenance` |
+| SARIF upload | ✅ Pass | All 4 reports visible in the repo's Security tab |
+
+Full scanner output is committed as `secure-cicd-reports` artifacts on the run above (`semgrep.sarif`, `gitleaks.sarif`, `trivy-fs.sarif`, `trivy-image.sarif`, `slsa-provenance.json`).
+
+> The 3 `CRITICAL` image CVEs are a known, real gap — flagged rather than hidden. They didn't block delivery because no fixed version exists yet upstream, which is exactly the "unfixed critical = tracked exception" policy stated above in practice, not just on paper. A production rollout would track these in an issue with a re-scan trigger once upstream ships a fix.
+
 </details>
 
 ---
@@ -176,19 +196,23 @@ Task 1–3 controls that would have caught it.
 
 ---
 
-## 📋 Honest status
+## 📋 Status
 
-Not everything is finished, and pretending otherwise would defeat the point
-of an assessment about judgement:
+All four tasks have working, verified artifacts against a live local
+cluster and a live CI/CD pipeline:
 
-- [ ] Task 1 manifests/policies/secrets — populate fully + capture live-cluster evidence
-- [ ] Task 2 — run the pipeline end to end, capture SARIF + `cosign verify` output
-- [ ] Task 3 — apply manifests to a live cluster, capture `istioctl authn tls-check` + allow/deny proof
-- [x] Task 4a — recon methodology and tooling defined
-- [ ] Task 4b — pentest report against local target
+- [x] Task 1 — manifests/policies/secrets applied to a live cluster; Kyverno rejection, SealedSecret, and RBAC proof captured
+- [x] Task 2 — pipeline runs end to end, SARIF uploaded, image signed + attested ([run #30710873777](https://github.com/hemasundharGit/Dodopayments-task/actions/runs/30710873777)); ArgoCD drift/self-heal demonstrated
+- [x] Task 3 — Istio applied to a live cluster; mTLS refusal and identity-based allow/deny proof captured
+- [x] Task 4a — passive recon against `dodopayments.tech` completed
+- [x] Task 4b — pentest against the local `ledger-api` target completed, findings written up with CVSS scoring
 
-**With more time, next:** finish Task 1 evidence collection, run the full
-CI/CD pipeline once and capture signing proof, then close out Task 4 Part B.
+**Note on evidence:** this README summarizes what was built and proven —
+the full command-by-command output, screenshots, and raw findings live in
+each task's own folder and README, plus
+[`LOCAL-SETUP-AND-RUNBOOK.md`](./LOCAL-SETUP-AND-RUNBOOK.md). That's
+deliberate: a reviewer verifying a specific control should be able to go
+straight to that task's evidence rather than a wall of screenshots here.
 
 ---
 
@@ -201,4 +225,4 @@ CI/CD pipeline once and capture signing proof, then close out Task 4 Part B.
 | Secure Delivery | 2 |
 | Offensive Skill | 4 |
 | Automation & Quality | `scripts/`, CI workflow, runbook reproducibility |
-| Judgement | Design-decision rationale throughout, honest gaps above |
+| Judgement | Design-decision rationale throughout, fail-policy tradeoffs stated explicitly (e.g. unfixed-CVE handling in Task 2) |
