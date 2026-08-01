@@ -222,34 +222,20 @@ jobs:
           GH_SERVER_URL: ${{ github.server_url }}
           GH_RUN_ID: ${{ github.run_id }}
         run: |
-          DIGEST_HEX="${IMAGE_DIGEST}"
-          DIGEST_HEX="${DIGEST_HEX#sha256:}"
           cat > "${REPORT_DIR}/slsa-provenance.json" <<EOF
           {
-            "_type": "https://in-toto.io/Statement/v1",
-            "subject": [
-              {
-                "name": "${IMAGE_NAME}",
-                "digest": {
-                  "sha256": "${DIGEST_HEX}"
-                }
+            "buildDefinition": {
+              "buildType": "https://github.com/Attestations/GitHubActionsWorkflow@v1",
+              "externalParameters": {
+                "workflow": "${GH_WORKFLOW}",
+                "repository": "${GH_REPOSITORY}",
+                "ref": "${GH_REF}",
+                "sha": "${GH_SHA}"
               }
-            ],
-            "predicateType": "https://slsa.dev/provenance/v1",
-            "predicate": {
-              "buildDefinition": {
-                "buildType": "https://github.com/Attestations/GitHubActionsWorkflow@v1",
-                "externalParameters": {
-                  "workflow": "${GH_WORKFLOW}",
-                  "repository": "${GH_REPOSITORY}",
-                  "ref": "${GH_REF}",
-                  "sha": "${GH_SHA}"
-                }
-              },
-              "runDetails": {
-                "builder": {
-                  "id": "${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
-                }
+            },
+            "runDetails": {
+              "builder": {
+                "id": "${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
               }
             }
           }
